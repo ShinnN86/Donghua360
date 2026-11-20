@@ -1,3 +1,4 @@
+
 <!DOCTYPE html>
 <html lang="es">
 <head>
@@ -79,6 +80,19 @@
         .hidden {
             display: none !important;
         }
+
+        /* Ajustes para celulares */
+        @media (max-width: 600px) {
+            #controls {
+                top: 10px;
+                gap: 6px;
+            }
+
+            button, .file-label {
+                padding: 10px 12px;
+                font-size: 12px;
+            }
+        }
     </style>
 
     <script type="importmap">
@@ -114,6 +128,10 @@
             Activar vista VR
         </button>
 
+        <button id="fullscreenBtn">
+            Pantalla completa
+        </button>
+
         <button id="exitBtn" class="hidden">
             Salir de VR
         </button>
@@ -138,6 +156,7 @@
         const gyroBtn = document.getElementById("gyroBtn");
         const vrBtn = document.getElementById("vrBtn");
         const exitBtn = document.getElementById("exitBtn");
+        const fullscreenBtn = document.getElementById("fullscreenBtn");
         const message = document.getElementById("message");
 
         let modoVR = false;
@@ -297,14 +316,66 @@
         exitBtn.addEventListener("click", desactivarVR);
 
         // =====================================
+        // PANTALLA COMPLETA
+        // =====================================
+
+        async function alternarPantallaCompleta() {
+
+            try {
+
+                if (!document.fullscreenElement) {
+
+                    await document.documentElement.requestFullscreen();
+
+                    fullscreenBtn.textContent =
+                        "Salir de pantalla completa";
+
+                } else {
+
+                    await document.exitFullscreen();
+
+                    fullscreenBtn.textContent =
+                        "Pantalla completa";
+
+                }
+
+            } catch (error) {
+
+                console.error(
+                    "Error al cambiar pantalla:",
+                    error
+                );
+
+                message.textContent =
+                    "No se pudo activar la pantalla completa en este dispositivo.";
+
+            }
+
+        }
+
+        fullscreenBtn.addEventListener(
+            "click",
+            alternarPantallaCompleta
+        );
+
+        // Detectar cambios de pantalla completa
+
+        document.addEventListener("fullscreenchange", () => {
+
+            fullscreenBtn.textContent =
+                document.fullscreenElement
+                    ? "Salir de pantalla completa"
+                    : "Pantalla completa";
+
+        });
+
+        // =====================================
         // GIROSCOPIO
         // =====================================
 
         const euler = new THREE.Euler();
         const q0 = new THREE.Quaternion();
         const q1 = new THREE.Quaternion();
-
-        const orientacionPantalla = new THREE.Vector3();
 
         function actualizarOrientacion(event) {
 
