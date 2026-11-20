@@ -1,0 +1,586 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Prueba VR Manual - Tour 360</title>
+
+    <style>
+        * {
+            box-sizing: border-box;
+        }
+
+        body {
+            margin: 0;
+            overflow: hidden;
+            background: #000;
+            font-family: Arial, sans-serif;
+            color: white;
+        }
+
+        #viewer {
+            position: fixed;
+            inset: 0;
+            width: 100%;
+            height: 100%;
+        }
+
+        canvas {
+            display: block;
+            width: 100%;
+            height: 100%;
+        }
+
+        #controls {
+            position: fixed;
+            top: 15px;
+            left: 50%;
+            transform: translateX(-50%);
+            z-index: 10;
+            display: flex;
+            flex-wrap: wrap;
+            justify-content: center;
+            gap: 8px;
+            width: 95%;
+        }
+
+        button, .file-label {
+            padding: 12px 16px;
+            border: 1px solid rgba(255,255,255,.2);
+            border-radius: 10px;
+            background: rgba(20,25,30,.85);
+            color: white;
+            font-size: 13px;
+            cursor: pointer;
+        }
+
+        button:active, .file-label:active {
+            background: #087caa;
+        }
+
+        #imageInput {
+            display: none;
+        }
+
+        #message {
+            position: fixed;
+            bottom: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            z-index: 10;
+            width: 90%;
+            text-align: center;
+            font-size: 13px;
+            color: white;
+            text-shadow: 0 2px 5px black;
+            pointer-events: none;
+        }
+
+        .hidden {
+            display: none !important;
+        }
+    </style>
+
+    <script type="importmap">
+    {
+        "imports": {
+            "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js"
+        }
+    }
+    </script>
+</head>
+
+<body>
+
+    <div id="viewer"></div>
+
+    <div id="controls">
+
+        <label class="file-label" for="imageInput">
+            Cargar panorama 360°
+        </label>
+
+        <input
+            type="file"
+            id="imageInput"
+            accept="image/*"
+        >
+
+        <button id="gyroBtn">
+            Activar giroscopio
+        </button>
+
+        <button id="vrBtn">
+            Activar vista VR
+        </button>
+
+        <button id="exitBtn" class="hidden">
+            Salir de VR
+        </button>
+
+    </div>
+
+    <div id="message">
+        Carga una imagen panorámica 360° para comenzar.
+    </div>
+
+    <script type="module">
+
+        import * as THREE from "three";
+
+        // =====================================
+        // CONFIGURACIÓN
+        // =====================================
+
+        const viewer = document.getElementById("viewer");
+
+        const imageInput = document.getElementById("imageInput");
+        const gyroBtn = document.getElementById("gyroBtn");
+        const vrBtn = document.getElementById("vrBtn");
+        const exitBtn = document.getElementById("exitBtn");
+        const message = document.getElementById("message");
+
+        let modoVR = false;
+        let gyroActivo = false;
+
+        const separacionOjos = 0.064;
+        const fov = 90;
+
+        let panorama = null;
+        let objectURL = null;
+
+        // =====================================
+        // ESCENA
+        // =====================================
+
+        const scene = new THREE.Scene();
+
+        const camera = new THREE.PerspectiveCamera(
+            fov,
+            window.innerWidth / window.innerHeight,
+            0.1,
+            1100
+        );
+
+        camera.position.set(0, 0, 0);
+        camera.rotation.order = "YXZ";
+
+        const renderer = new THREE.WebGLRenderer({
+            antialias: true,
+            alpha: false
+        });
+
+        renderer.setPixelRatio(
+            Math.min(window.devicePixelRatio, 2)
+        );
+
+        renderer.setSize(
+            window.innerWidth,
+            window.innerHeight
+        );
+
+        renderer.setScissorTest(false);
+
+        viewer.appendChild(renderer.domElement);
+
+        // Cámaras independientes para cada ojo
+
+        const cameraLeft = new THREE.PerspectiveCamera();
+        const cameraRight = new THREE.PerspectiveCamera();
+
+        // =====================================
+        // CARGAR PANORAMA
+        // =====================================
+
+        imageInput.addEventListener("change", (event) => {
+
+            const file = event.target.files[0];
+
+            if (!file) return;
+
+            if (objectURL) {
+                URL.revokeObjectURL(objectURL);
+            }
+
+            objectURL = URL.createObjectURL(file);
+
+            new THREE.TextureLoader().load(
+                objectURL,
+
+                (texture) => {
+
+                    texture.colorSpace = THREE.SRGBColorSpace;
+
+                    if (panorama) {
+                        panorama.material.map?.dispose();
+                        panorama.material.dispose();
+                        panorama.geometry.dispose();
+                        scene.remove(panorama);
+                    }
+
+                    const geometry = new THREE.SphereGeometry(
+                        500,
+                        60,
+                        40
+                    );
+
+                    const material = new THREE.MeshBasicMaterial({
+                        map: texture,
+                        side: THREE.BackSide
+                    });
+
+                    panorama = new THREE.Mesh(
+                        geometry,
+                        material
+                    );
+
+                    scene.add(panorama);
+
+                    message.textContent =
+                        "Panorama cargado. Puedes activar la vista VR.";
+
+                },
+
+                undefined,
+
+                () => {
+                    message.textContent =
+                        "No se pudo cargar la imagen.";
+                }
+            );
+
+        });
+
+        // =====================================
+        // VISTA VR MANUAL
+        // =====================================
+
+        function activarVR() {
+
+            if (!panorama) {
+                message.textContent =
+                    "Primero debes cargar una imagen 360°.";
+                return;
+            }
+
+            modoVR = true;
+
+            renderer.setScissorTest(true);
+
+            vrBtn.classList.add("hidden");
+            exitBtn.classList.remove("hidden");
+
+            document.getElementById("controls").style.opacity = "0.25";
+
+            message.textContent =
+                "Vista VR activa. Introduce el celular en tu Cardboard.";
+
+        }
+
+        function desactivarVR() {
+
+            modoVR = false;
+
+            renderer.setScissorTest(false);
+
+            vrBtn.classList.remove("hidden");
+            exitBtn.classList.add("hidden");
+
+            document.getElementById("controls").style.opacity = "1";
+
+            message.textContent =
+                "Vista normal activada.";
+
+        }
+
+        vrBtn.addEventListener("click", activarVR);
+        exitBtn.addEventListener("click", desactivarVR);
+
+        // =====================================
+        // GIROSCOPIO
+        // =====================================
+
+        const euler = new THREE.Euler();
+        const q0 = new THREE.Quaternion();
+        const q1 = new THREE.Quaternion();
+
+        const orientacionPantalla = new THREE.Vector3();
+
+        function actualizarOrientacion(event) {
+
+            if (!gyroActivo) return;
+
+            const alpha = THREE.MathUtils.degToRad(
+                event.alpha || 0
+            );
+
+            const beta = THREE.MathUtils.degToRad(
+                event.beta || 0
+            );
+
+            const gamma = THREE.MathUtils.degToRad(
+                event.gamma || 0
+            );
+
+            euler.set(
+                beta,
+                alpha,
+                -gamma,
+                "YXZ"
+            );
+
+            camera.quaternion.setFromEuler(euler);
+
+            q1.setFromAxisAngle(
+                new THREE.Vector3(1, 0, 0),
+                -Math.PI / 2
+            );
+
+            camera.quaternion.multiply(q1);
+
+            const screenAngle =
+                THREE.MathUtils.degToRad(
+                    window.screen.orientation?.angle || 0
+                );
+
+            q0.setFromAxisAngle(
+                new THREE.Vector3(0, 0, 1),
+                -screenAngle
+            );
+
+            camera.quaternion.multiply(q0);
+
+        }
+
+        async function activarGiroscopio() {
+
+            try {
+
+                if (
+                    typeof DeviceOrientationEvent !== "undefined" &&
+                    typeof DeviceOrientationEvent.requestPermission === "function"
+                ) {
+
+                    const permiso =
+                        await DeviceOrientationEvent.requestPermission();
+
+                    if (permiso !== "granted") {
+                        message.textContent =
+                            "No se concedió permiso para el giroscopio.";
+                        return;
+                    }
+
+                }
+
+                window.addEventListener(
+                    "deviceorientation",
+                    actualizarOrientacion
+                );
+
+                gyroActivo = true;
+
+                gyroBtn.textContent = "Giroscopio activado";
+
+                message.textContent =
+                    "Giroscopio activado. Gira tu celular para explorar.";
+
+            } catch (error) {
+
+                message.textContent =
+                    "No se pudo activar el giroscopio.";
+
+                console.error(error);
+
+            }
+
+        }
+
+        gyroBtn.addEventListener(
+            "click",
+            activarGiroscopio
+        );
+
+        // =====================================
+        // MOVIMIENTO CON MOUSE O DEDO
+        // =====================================
+
+        let arrastrando = false;
+        let anteriorX = 0;
+        let anteriorY = 0;
+
+        let rotacionX = 0;
+        let rotacionY = 0;
+
+        renderer.domElement.addEventListener(
+            "pointerdown",
+            (event) => {
+
+                if (gyroActivo) return;
+
+                arrastrando = true;
+
+                anteriorX = event.clientX;
+                anteriorY = event.clientY;
+
+            }
+        );
+
+        window.addEventListener(
+            "pointerup",
+            () => {
+                arrastrando = false;
+            }
+        );
+
+        window.addEventListener(
+            "pointermove",
+            (event) => {
+
+                if (!arrastrando || gyroActivo) return;
+
+                const dx = event.clientX - anteriorX;
+                const dy = event.clientY - anteriorY;
+
+                rotacionY -= dx * 0.004;
+                rotacionX -= dy * 0.004;
+
+                rotacionX = THREE.MathUtils.clamp(
+                    rotacionX,
+                    -Math.PI / 2,
+                    Math.PI / 2
+                );
+
+                camera.rotation.set(
+                    rotacionX,
+                    rotacionY,
+                    0,
+                    "YXZ"
+                );
+
+                anteriorX = event.clientX;
+                anteriorY = event.clientY;
+
+            }
+        );
+
+        // =====================================
+        // RENDERIZADO ESTÉREO
+        // =====================================
+
+        function renderVR() {
+
+            const width = window.innerWidth;
+            const height = window.innerHeight;
+
+            const mitad = Math.floor(width / 2);
+
+            cameraLeft.copy(camera);
+            cameraRight.copy(camera);
+
+            cameraLeft.aspect = mitad / height;
+            cameraRight.aspect = (width - mitad) / height;
+
+            cameraLeft.fov = fov;
+            cameraRight.fov = fov;
+
+            cameraLeft.position.copy(camera.position);
+            cameraRight.position.copy(camera.position);
+
+            cameraLeft.translateX(-separacionOjos / 2);
+            cameraRight.translateX(separacionOjos / 2);
+
+            cameraLeft.updateProjectionMatrix();
+            cameraRight.updateProjectionMatrix();
+
+            // Ojo izquierdo
+
+            renderer.setViewport(
+                0, 0, mitad, height
+            );
+
+            renderer.setScissor(
+                0, 0, mitad, height
+            );
+
+            renderer.clear();
+
+            renderer.render(
+                scene,
+                cameraLeft
+            );
+
+            // Ojo derecho
+
+            renderer.setViewport(
+                mitad, 0, width - mitad, height
+            );
+
+            renderer.setScissor(
+                mitad, 0, width - mitad, height
+            );
+
+            renderer.clear();
+
+            renderer.render(
+                scene,
+                cameraRight
+            );
+
+        }
+
+        // =====================================
+        // BUCLE PRINCIPAL
+        // =====================================
+
+        function animate() {
+
+            requestAnimationFrame(animate);
+
+            if (modoVR) {
+
+                renderVR();
+
+            } else {
+
+                renderer.setViewport(
+                    0,
+                    0,
+                    window.innerWidth,
+                    window.innerHeight
+                );
+
+                renderer.clear();
+
+                renderer.render(
+                    scene,
+                    camera
+                );
+
+            }
+
+        }
+
+        animate();
+
+        // =====================================
+        // REDIMENSIONAR
+        // =====================================
+
+        window.addEventListener("resize", () => {
+
+            camera.aspect =
+                window.innerWidth / window.innerHeight;
+
+            camera.updateProjectionMatrix();
+
+            renderer.setSize(
+                window.innerWidth,
+                window.innerHeight
+            );
+
+        });
+
+    </script>
+
+</body>
+</html>
